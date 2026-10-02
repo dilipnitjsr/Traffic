@@ -25,11 +25,11 @@ class TCNForecaster(nn.Module):
         super().__init__()
         channels = num_nodes * num_features
         self.network = nn.Sequential(
-            nn.Conv1d(channels, hidden, kernel_size=3, padding=2, dilation=1),
+            nn.Conv1d(channels, hidden, kernel_size=3, padding=1, dilation=1),
             nn.ReLU(),
-            nn.Conv1d(hidden, hidden, kernel_size=3, padding=4, dilation=2),
+            nn.Conv1d(hidden, hidden, kernel_size=3, padding=2, dilation=2),
             nn.ReLU(),
-            nn.Conv1d(hidden, hidden, kernel_size=3, padding=8, dilation=4),
+            nn.Conv1d(hidden, hidden, kernel_size=3, padding=4, dilation=4),
             nn.ReLU(),
         )
         self.head = nn.Linear(hidden, num_nodes)
@@ -38,8 +38,6 @@ class TCNForecaster(nn.Module):
         batch, steps, nodes, features = x.shape
         z = x.reshape(batch, steps, nodes * features).transpose(1, 2)
         z = self.network(z)
-        # Convolution padding intentionally grows the sequence; last position
-        # summarizes the causal receptive field for this compact baseline.
         return self.head(z[:, :, -1])
 
 
