@@ -1,123 +1,215 @@
 # Traffic Forecasting
 
-A reproducible machine-learning baseline for forecasting road traffic volume from timestamped observations.
+Comparative machine-learning, deep-learning, and spatiotemporal forecasting framework for multi-junction road traffic.
 
-The repository starts with a leakage-aware time-series workflow rather than a random train/test split:
+## Implemented models
 
-```text
-CSV data
-  ↓
-schema validation
-  ↓
-timestamp sorting
-  ↓
-calendar + lag/rolling features
-  ↓
-chronological train/test split
-  ↓
-RandomForest baseline
-  ↓
-MAE / RMSE / R²
-  ↓
-saved model artifact
-  ↓
-batch prediction
-```
+The same chronological train/test windows and metrics are used for:
 
-## Data format
+| family | model |
+|---|---|
+| Ensemble baseline | Random Forest |
+| Gradient boosting | XGBoost |
+| Gradient boosting | LightGBM |
+| Recurrent DL | LSTM |
+| Temporal convolution | TCN |
+| Attention | Transformer encoder |
+| Spatiotemporal graph DL | ST-GNN: normalized graph convolution + GRU |
 
-Prepare a CSV with at least:
+The ST-GNN explicitly uses a junction adjacency matrix. If latitude/longitude columns are available, the graph is built from nearest spatial neighbours. Otherwise, a simple ring topology is used as a deterministic fallback.
 
-| column | type | description |
-|---|---|---|
-| `timestamp` | datetime | observation time |
-| `traffic_volume` | numeric | target traffic count/flow |
+## Multi-junction data schema
 
-Optional numeric exogenous columns are retained automatically and can be used as predictors.
+Required columns:
+
+| column | description |
+|---|---|
+| `timestamp` | observation timestamp |
+| `junction_id` | stable road junction/sensor identifier |
+| `traffic_volume` | traffic count/flow target |
+
+Recommended optional columns:
+
+| column | description |
+|---|---|
+| `latitude` | junction latitude used to build spatial graph |
+| `longitude` | junction longitude used to build spatial graph |
+| other numeric columns | retained in raw data for future feature extensions |
+
+Each timestamp must contain one observation for every junction.
 
 Example:
 
 ```csv
-timestamp,traffic_volume,temperature,rain_mm
-2026-01-01 00:00:00,320,18.2,0
-2026-01-01 01:00:00,280,17.8,0
+timestamp,junction_id,traffic_volume,latitude,longitude
+2026-01-01 00:00:00,J01,320,22.80,86.24
+2026-01-01 00:00:00,J02,280,22.83,86.22
+2026-01-01 01:00:00,J01,305,22.80,86.24
+2026-01-01 01:00:00,J02,270,22.83,86.22
 ```
 
-## Setup
+## Installation
+
+Core baseline only:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
-On Windows:
+Full comparative framework:
 
-```powershell
-.venv\Scripts\activate
-pip install -r requirements.txt
+```bash
+pip install -e ".[benchmark,dev]"
 ```
 
-## Quick end-to-end demo
+The full benchmark extra installs XGBoost, LightGBM, and PyTorch.
 
-Generate a synthetic hourly dataset:
+## Quick multi-junction demo
+
+Generate synthetic correlated traffic from six junctions:
+
+```bash
+python -m traffic_ml.generate_multijunction \
+  --rows-per-junction 1080 \
+  --junctions 6 \
+  --output data/multijunction.csv
+```
+
+Run the complete comparison:
+
+```bash
+python -m traffic_ml.benchmark \
+  --data data/multijunction.csv \
+  --history 24 \
+  --horizon 1 \
+  --epochs 10
+```
+
+Run selected models:
+
+```bash
+python -m traffic_ml.benchmark \
+  --data data/multijunction.csv \
+  --models xgboost lightgbm lstm transformer stgnn \
+  --history 24 \
+  --epochs 20
+```
+
+## Benchmark outputs
+
+By default results are written to `artifacts/benchmark/`:
+
+```text
+benchmark_config.json
+leaderboard.csv
+predictions.csv
+random_forest.joblib
+xgboost.joblib
+lightgbm.joblib
+lstm.pt
+tcn.pt
+transformer.pt
+stgnn.pt
+```
+
+The leaderboard contains common metrics:
+
+- MAE
+- RMSE
+- R²
+- MAPE
+- model training time
+- number of train/test windows
+
+`predictions.csv` stores actual and predicted traffic for each model, timestamp, and junction, which makes junction-level error analysis straightforward.
+
+## Common experimental protocol
+
+All models use the same preprocessing:
+
+```text
+multi-junction CSV
+      ↓
+validate complete timestamp × junction panel
+      ↓
+sort chronologically
+      ↓
+24-step historical windows
+      ↓
+traffic + cyclic hour/day calendar features
+      ↓
+chronological train/test split
+      ↓
+same target timestamps for every model
+      ↓
+common evaluation metrics
+```
+
+No random row-wise train/test split is used.
+
+## Model details
+
+### Random Forest / XGBoost / LightGBM
+
+The complete historical window is flattened into a tabular feature vector. Each model predicts traffic for all junctions at the next forecast horizon. XGBoost and LightGBM are wrapped as multi-output regressors for consistent behaviour across junctions.
+
+### LSTM
+
+The historical network state is flattened per timestamp and passed through an LSTM. The final recurrent state predicts all junctions simultaneously.
+
+### TCN
+
+Dilated one-dimensional temporal convolutions capture short- and medium-range traffic dynamics across the historical window.
+
+### Transformer
+
+Each timestamp is projected into an embedding, combined with positional encoding, and processed by a Transformer encoder. The final temporal representation predicts all junctions.
+
+### ST-GNN
+
+For each historical timestamp:
+
+1. node features are projected into a graph hidden space;
+2. normalized adjacency propagates information between connected junctions;
+3. each junction's graph-aware sequence is processed by a GRU;
+4. the final hidden state predicts the next traffic value for that junction.
+
+This gives the model an explicit spatial inductive bias absent from LSTM/TCN/Transformer baselines.
+
+## Graph construction
+
+When `latitude` and `longitude` are available, each junction is connected to its nearest neighbours. Self-loops are included and the adjacency matrix is symmetrically normalized:
+
+```text
+A_hat = D^(-1/2) A D^(-1/2)
+```
+
+The normalized matrix is stored in `benchmark_config.json` for reproducibility.
+
+## Legacy single-junction baseline
+
+The original single-location Random Forest workflow remains available:
 
 ```bash
 python -m traffic_ml.generate_sample --output data/traffic.csv
-```
-
-Then train and evaluate:
-
-```bash
 python -m traffic_ml.train --data data/traffic.csv
+python -m traffic_ml.predict --data data/traffic.csv
 ```
 
-The model is written to `artifacts/traffic_model.joblib` and evaluation metrics to `artifacts/metrics.json`.
-
-## Train
-
-```bash
-python -m traffic_ml.train \
-  --data data/traffic.csv \
-  --model artifacts/traffic_model.joblib \
-  --metrics artifacts/metrics.json
-```
-
-## Predict
-
-```bash
-python -m traffic_ml.predict \
-  --data data/traffic.csv \
-  --model artifacts/traffic_model.joblib \
-  --output artifacts/predictions.csv
-```
-
-## Tests
+## Tests and CI
 
 ```bash
 pytest
 ```
 
-## Design choices
+GitHub Actions runs:
 
-- **Chronological split:** prevents future observations from leaking into training.
-- **Lag features:** capture short-term traffic persistence.
-- **Rolling statistics:** represent recent traffic level and volatility.
-- **Calendar features:** hour, weekday, month and weekend effects.
-- **RandomForest baseline:** robust nonlinear benchmark with little tuning.
+1. core preprocessing/unit tests;
+2. PyTorch model interface tests;
+3. a full one-epoch smoke benchmark across all seven models.
 
-This is a baseline for research and prototyping. For stronger forecasting studies, compare against gradient boosting, XGBoost/LightGBM, LSTM/TCN, temporal transformers, and spatiotemporal graph neural networks where multi-location sensor topology is available.
+## Research extensions
 
-## Repository layout
-
-```text
-traffic_ml/
-  features.py
-  train.py
-  predict.py
-tests/
-data/
-artifacts/
-```
-
-Raw datasets and trained artifacts are ignored by Git by default.
+The framework is structured so additional experiments can be added without changing the evaluation contract. Natural next additions include multi-step forecasting, learned/dynamic adjacency, attention-based graph networks, external weather/events, uncertainty estimation, domain adaptation across cities, and optimization-guided model selection.
