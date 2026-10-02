@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "traffic-forecasting"
-version = "0.1.0"
-description = "Leakage-aware machine-learning baseline for traffic-volume forecasting"
+version = "0.2.0"
+description = "Comparative ML/DL/spatiotemporal framework for multi-junction traffic forecasting"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "numpy>=1.26,<3",
   "pandas>=2.1,<3",
@@ -16,6 +16,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+benchmark = [
+  "xgboost>=3.4,<4",
+  "lightgbm>=4.7,<5",
+  "torch>=2.14,<3",
+]
 dev = [
   "pytest>=8,<9",
 ]
