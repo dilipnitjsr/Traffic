@@ -58,6 +58,22 @@ On Windows:
 pip install -r requirements.txt
 ```
 
+## Quick end-to-end demo
+
+Generate a synthetic hourly dataset:
+
+```bash
+python -m traffic_ml.generate_sample --output data/traffic.csv
+```
+
+Then train and evaluate:
+
+```bash
+python -m traffic_ml.train --data data/traffic.csv
+```
+
+The model is written to `artifacts/traffic_model.joblib` and evaluation metrics to `artifacts/metrics.json`.
+
 ## Train
 
 ```bash
