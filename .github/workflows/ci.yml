@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  core-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +21,34 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install project and test dependencies
+      - name: Install core project
         run: pip install -e ".[dev]"
 
-      - name: Run tests
-        run: pytest
+      - name: Run core tests
+        run: pytest -q tests/test_features.py tests/test_generate_sample.py tests/test_multijunction.py
+
+  comparative-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install full benchmark stack
+        run: pip install -e ".[benchmark,dev]"
+
+      - name: Test neural model interfaces
+        run: pytest -q tests/test_torch_models.py
+
+      - name: Generate small multi-junction dataset
+        run: |
+          python -m traffic_ml.generate_multijunction             --rows-per-junction 120             --junctions 4             --output /tmp/multijunction.csv
+
+      - name: Run all-model benchmark smoke test
+        run: |
+          python -m traffic_ml.benchmark             --data /tmp/multijunction.csv             --output-dir /tmp/benchmark             --history 12             --models random_forest xgboost lightgbm lstm tcn transformer stgnn             --epochs 1             --batch-size 32
+          test -f /tmp/benchmark/leaderboard.csv
+          test -f /tmp/benchmark/predictions.csv
